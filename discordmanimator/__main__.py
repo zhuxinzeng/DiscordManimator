@@ -1,12 +1,13 @@
+from __future__ import annotations
+
 import argparse
+from pathlib import Path
+
 import toml
 
 import discordmanimator
 
-from pathlib import Path
-
 from .DiscordManimator import create_and_run_bot
-
 
 parser = argparse.ArgumentParser(prog="DiscordManimator")
 parser.add_argument("configfile", help="Path to the configfile", type=Path)

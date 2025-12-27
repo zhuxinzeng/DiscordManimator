@@ -1,12 +1,14 @@
+from __future__ import annotations
+
 import asyncio
+import logging
 import os
 import traceback
+from pathlib import Path
 
 import discord
-import logging
-
 from discord.ext import commands
-from pathlib import Path
+
 
 def create_and_run_bot(config):
     intents = discord.Intents.default()

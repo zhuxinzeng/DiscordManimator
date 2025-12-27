@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import discord
 import logging
-import requests
 
+import discord
+import requests
 from discord import app_commands
 from discord.ext import commands
 
@@ -32,7 +32,7 @@ class SearchDocumentation(commands.Cog):
                 return
 
             response = req.json()
-        except:
+        except Exception:
             await interaction.followup.send(
                 content="Failed to establish a connection. Try again later."
             )
@@ -47,11 +47,10 @@ class SearchDocumentation(commands.Cog):
                 return
 
             title = f"Documentation results for `{query}`"
-            embeds = []
 
             embed = discord.Embed(title=title, color=0xE8E3E3)
 
-            for ind, result in enumerate(query_results):
+            for result in query_results:
                 url = result["domain"] + result["path"]
                 for itm in result["blocks"]:
                     itm_name = itm.get("name", None) or itm.get("title", None)

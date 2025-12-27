@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import discord
 import io
 import logging
+import os
 import re
 import tempfile
 import traceback
-import os
-
-import discordmanimator
-
-from discord.ext import commands
 from pathlib import Path
+from typing import Any
 
 import aiodocker
+import discord
+from discord.ext import commands
+
+import discordmanimator
 
 # time in seconds after which view (= button row) is removed
 VIEW_TIMEOUT = 120
@@ -97,7 +97,7 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
     async def on_submit(self, interaction: discord.Interaction):
         if ";" in self.CLI_flags.value or "&" in self.CLI_flags.value:
             await interaction.response.send_message(
-                f"Something went wrong, please try again.",
+                "Something went wrong, please try again.",
                 ephemeral=True,
             )
             return
@@ -126,7 +126,7 @@ def extract_manim_snippets(msg) -> None | str:
     return pattern.findall(msg)
 
 
-async def render_animation_snippet(code_message, cli_flags=None) -> Dict[str, Any]:
+async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, Any]:
     if cli_flags is None:
         cli_flags = []
 
@@ -177,10 +177,8 @@ async def render_animation_snippet(code_message, cli_flags=None) -> Dict[str, An
                     },
                 }
             )
-            manim_stderr = []
+            manim_stderr = [line.rstrip() async for line in container.log(follow=True, stderr=True)]
             # `follow=True` allow to keep the stream open until the container stops
-            async for line in container.log(follow=True, stderr=True):
-                manim_stderr.append(line.rstrip())
             await dockerclient.close()
             if manim_stderr:
                 raise ManimError(traceback=manim_stderr)
@@ -205,7 +203,7 @@ async def render_animation_snippet(code_message, cli_flags=None) -> Dict[str, An
                     # something else (?) went wrong
                     tb = str.encode(traceback.format_exc())
                 reply_args = {
-                    "content": f"Something went wrong, the error log is attached. :cry:",
+                    "content": "Something went wrong, the error log is attached. :cry:",
                     "cli_flags": cli_flags,
                     "attachments": [
                         discord.File(fp=io.BytesIO(tb), filename="error.log"),
@@ -215,7 +213,7 @@ async def render_animation_snippet(code_message, cli_flags=None) -> Dict[str, An
 
         try:
             [outfilepath] = Path(tmpdirname).rglob("scriptoutput.*")
-        except Exception as e:
+        except Exception:
             reply_args = {
                 "content": "Something went wrong: no (unique) output file was produced. :cry:",
                 "cli_flags": cli_flags,
@@ -228,8 +226,8 @@ async def render_animation_snippet(code_message, cli_flags=None) -> Dict[str, An
                     discord.File(outfilepath),
                 ],
             }
-        finally:
-            return reply_args
+
+        return reply_args
 
 
 async def setup(bot: commands.Bot):
@@ -239,5 +237,5 @@ async def setup(bot: commands.Bot):
 
 
 class ManimError(ChildProcessError):
-    def __init__(self, traceback: List[str]):
+    def __init__(self, traceback: list[str]):
         self.traceback = "\n".join(traceback)
