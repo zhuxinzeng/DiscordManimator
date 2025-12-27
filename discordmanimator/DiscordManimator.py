@@ -26,12 +26,10 @@ def create_and_run_bot(config):
         intents=intents,
     )
 
-
     @bot.event
     async def on_ready():
         logging.info(f"Logged in as {bot.user.name}")
         await bot.tree.sync()
-
 
     async def load_cogs():
         for extension in os.listdir(Path(__file__).parent / "cogs/"):
@@ -41,7 +39,6 @@ def create_and_run_bot(config):
                 except Exception:
                     logging.error(f"{extension} couldn't be loaded.")
                     traceback.print_exc()
-
 
     asyncio.run(load_cogs())
 

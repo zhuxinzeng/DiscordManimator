@@ -177,7 +177,9 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
                     },
                 }
             )
-            manim_stderr = [line.rstrip() async for line in container.log(follow=True, stderr=True)]
+            manim_stderr = [
+                line.rstrip() async for line in container.log(follow=True, stderr=True)
+            ]
             # `follow=True` allow to keep the stream open until the container stops
             await dockerclient.close()
             if manim_stderr:
