@@ -13,7 +13,7 @@ import aiodocker
 import discord
 from discord.ext import commands
 
-import discordmanimator
+from ..config import get_config
 
 # time in seconds after which view (= button row) is removed
 VIEW_TIMEOUT = 120
@@ -23,6 +23,7 @@ class RenderCodeblock(commands.Cog):
     def __init__(self, bot: commands.Bot) -> None:
         super().__init__()
         self.bot = bot
+        self.config = get_config()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -127,8 +128,26 @@ def extract_manim_snippets(msg) -> None | str:
 
 
 async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, Any]:
+    """Render a Manim animation snippet from a code message.
+
+    Args:
+        code_message: Discord message containing the code snippet
+        cli_flags: Optional list of CLI flags to pass to manim
+
+    Returns:
+        Dictionary with response content and attachments
+    """
     if cli_flags is None:
         cli_flags = []
+
+    config = get_config()
+
+    # Check if Docker is disabled
+    if config.render.no_docker:
+        return {
+            "content": "Docker rendering is disabled. Cannot render animations.",
+            "cli_flags": cli_flags,
+        }
 
     dockerclient = aiodocker.Docker()
 
@@ -146,7 +165,7 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
         snippet = snippet.split("\n")
 
     prescript = ["from manim import *"]
-    if discordmanimator.config.get("USE_ONLINETEX"):
+    if config.render.use_onlinetex:
         prescript.append("from manim_onlinetex import *")
     script = prescript + snippet
 
