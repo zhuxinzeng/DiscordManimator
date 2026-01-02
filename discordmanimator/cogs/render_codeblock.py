@@ -149,8 +149,6 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
             "cli_flags": cli_flags,
         }
 
-    dockerclient = aiodocker.Docker()
-
     # theoretically, multiple snippets could be rendered
     # at once. for now, we'll just choose and render the
     # first one.
@@ -175,32 +173,33 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
 
         try:
             reply_args = None
-            container = await dockerclient.containers.run(
-                config={
-                    "Image": config.render.docker_image,
-                    "Cmd": [
-                        "timeout",
-                        str(config.render.container_timeout),
-                        "manim",
-                        f"--quality={config.render.render_quality}",
-                        "--disable_caching",
-                        "--progress_bar=none",
-                        "--output_file=scriptoutput",
-                        *cli_flags,
-                        "/manim/script.py",
-                    ],
-                    "User": str(os.getuid()),
-                    "HostConfig": {
-                        "Binds": [f"{tmpdirname}:/manim/:rw"],
-                        "AutoRemove": True,
-                    },
-                }
-            )
-            manim_stderr = [
-                line.rstrip() async for line in container.log(follow=True, stderr=True)
-            ]
-            # `follow=True` allow to keep the stream open until the container stops
-            await dockerclient.close()
+            async with aiodocker.Docker() as dockerclient:
+                container = await dockerclient.containers.run(
+                    config={
+                        "Image": config.render.docker_image,
+                        "Cmd": [
+                            "timeout",
+                            str(config.render.container_timeout),
+                            "manim",
+                            f"--quality={config.render.render_quality}",
+                            "--disable_caching",
+                            "--progress_bar=none",
+                            "--output_file=scriptoutput",
+                            *cli_flags,
+                            "/manim/script.py",
+                        ],
+                        "User": str(os.getuid()),
+                        "HostConfig": {
+                            "Binds": [f"{tmpdirname}:/manim/:rw"],
+                            "AutoRemove": True,
+                        },
+                    }
+                )
+                manim_stderr = [
+                    line.rstrip()
+                    async for line in container.log(follow=True, stderr=True)
+                ]
+                # `follow=True` allow to keep the stream open until the container stops
             if manim_stderr:
                 raise ManimError(traceback=manim_stderr)
         except Exception as e:
