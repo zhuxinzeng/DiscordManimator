@@ -3,21 +3,30 @@ name = "discordmanimator"
 version = "0.1.0"
 description = ""
 authors = [{ name = "Manim Community Developers" }]
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 license = "MIT"
 dependencies = [
     "discord.py",
     "python-dotenv",
     "docker",
     "aiodocker",
-    "toml>=0.10.2",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    "tomli-w>=1.0.0",
 ]
 
 [dependency-groups]
 dev = [
   "ruff",
+  "pytest>=7.0",
+  "pytest-asyncio>=0.21",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

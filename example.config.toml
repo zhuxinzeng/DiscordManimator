@@ -1,5 +1,10 @@
-PREFIX = "!"
-TOKEN = "paste_token_here"
+token = "paste_your_bot_token_here"
 
-NO_DOCKER = false
-USE_ONLINETEX = false
+[bot]
+prefix = "!"
+description = "Manim Community Discord Bot"
+activity_name = "Animating with Manim"
+
+[render]
+no_docker = false
+use_onlinetex = false
