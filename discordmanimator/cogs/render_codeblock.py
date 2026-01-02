@@ -40,6 +40,10 @@ class RenderCodeblock(commands.Cog):
 
 
 class RenderView(discord.ui.View):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.message_deleted = False
+
     @discord.ui.button(
         label="Yes, render",
         style=discord.ButtonStyle.blurple,
@@ -81,10 +85,17 @@ class RenderView(discord.ui.View):
         interaction: discord.Interaction,
         button: discord.ui.Button,
     ):
+        self.message_deleted = True
         await interaction.message.delete()
 
     async def on_timeout(self):
-        await self.message.edit(view=self.clear_items())
+        if self.message_deleted:
+            return
+        try:
+            await self.message.edit(view=self.clear_items())
+        except discord.NotFound:
+            # Message was already deleted
+            pass
 
 
 class SettingsModal(discord.ui.Modal, title="Change render settings"):
