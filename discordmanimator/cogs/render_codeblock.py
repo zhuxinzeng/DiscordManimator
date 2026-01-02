@@ -183,7 +183,6 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
             f.write("\n".join(script))
 
         try:
-            reply_args = None
             async with aiodocker.Docker() as dockerclient:
                 container = await dockerclient.containers.run(
                     config={
@@ -211,54 +210,93 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
                     async for line in container.log(follow=True, stderr=True)
                 ]
                 # `follow=True` allow to keep the stream open until the container stops
+
             if manim_stderr:
                 raise ManimError(traceback=manim_stderr)
-        except Exception as e:
-            if isinstance(e, ManimError):  # manim itself threw an error
-                reply_args = {
-                    "content": "Something went wrong! :cry: Here is what Manim reports.",
-                    "cli_flags": cli_flags,
-                    "attachments": [
-                        discord.File(
-                            fp=io.StringIO(e.traceback),
-                            filename="error.log",
-                        ),
-                    ],
-                }
-                return reply_args
-            else:
-                if isinstance(e, aiodocker.DockerContainerError):
-                    # communication with docker yields error
-                    tb = e.message
-                else:
-                    # something else (?) went wrong
-                    tb = str.encode(traceback.format_exc())
-                reply_args = {
-                    "content": "Something went wrong, the error log is attached. :cry:",
-                    "cli_flags": cli_flags,
-                    "attachments": [
-                        discord.File(fp=io.BytesIO(tb), filename="error.log"),
-                    ],
-                }
-                return reply_args
 
-        try:
-            [outfilepath] = Path(tmpdirname).rglob("scriptoutput.*")
-        except Exception:
-            reply_args = {
-                "content": "Something went wrong: no (unique) output file was produced. :cry:",
-                "cli_flags": cli_flags,
-            }
-        else:
-            reply_args = {
-                "content": "Here you go!",
+        except ManimError as e:
+            # Manim itself threw an error (expected error case)
+            logger.info("Manim rendering failed with error")
+            return {
+                "content": "Something went wrong! :cry: Here is what Manim reports.",
                 "cli_flags": cli_flags,
                 "attachments": [
-                    discord.File(outfilepath),
+                    discord.File(
+                        fp=io.StringIO(e.traceback),
+                        filename="error.log",
+                    ),
                 ],
             }
 
-        return reply_args
+        except aiodocker.DockerContainerError as e:
+            # Docker container execution failed
+            logger.error(f"Docker container error: {e.message}", exc_info=True)
+            return {
+                "content": "Something went wrong with the Docker container. :cry:",
+                "cli_flags": cli_flags,
+                "attachments": [
+                    discord.File(
+                        fp=io.BytesIO(e.message),
+                        filename="error.log",
+                    ),
+                ],
+            }
+
+        except aiodocker.DockerError as e:
+            # Docker communication error (daemon not running, etc.)
+            logger.error(f"Docker error: {e}", exc_info=True)
+            error_msg = f"Docker error: {e}"
+            return {
+                "content": "Could not connect to Docker. :cry:",
+                "cli_flags": cli_flags,
+                "attachments": [
+                    discord.File(
+                        fp=io.BytesIO(error_msg.encode()),
+                        filename="error.log",
+                    ),
+                ],
+            }
+
+        except Exception as e:
+            # Unexpected error
+            logger.error(f"Unexpected error during rendering: {e}", exc_info=True)
+            tb = traceback.format_exc()
+            return {
+                "content": "An unexpected error occurred. :cry:",
+                "cli_flags": cli_flags,
+                "attachments": [
+                    discord.File(
+                        fp=io.BytesIO(tb.encode()),
+                        filename="error.log",
+                    ),
+                ],
+            }
+
+        # Find output file
+        output_files = list(Path(tmpdirname).rglob("scriptoutput.*"))
+        if len(output_files) == 0:
+            logger.warning("No output file was produced")
+            return {
+                "content": "No output file was produced. :cry:",
+                "cli_flags": cli_flags,
+            }
+        elif len(output_files) > 1:
+            logger.warning(f"Multiple output files found: {output_files}")
+            return {
+                "content": f"Multiple output files found ({len(output_files)}). :cry:",
+                "cli_flags": cli_flags,
+            }
+
+        # Success case
+        outfilepath = output_files[0]
+        logger.info(f"Successfully rendered animation: {outfilepath.name}")
+        return {
+            "content": "Here you go!",
+            "cli_flags": cli_flags,
+            "attachments": [
+                discord.File(outfilepath),
+            ],
+        }
 
 
 async def setup(bot: commands.Bot):
