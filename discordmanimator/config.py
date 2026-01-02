@@ -201,6 +201,20 @@ class Config(BaseSettings):
 
         logging.info(f"Example configuration saved to: {path}")
 
+    def print_summary(self) -> None:
+        """Print a human-readable summary of the configuration.
+
+        This is useful for showing the user what settings are active at startup.
+        """
+        print(f"  Command prefix: {self.bot.prefix}")
+        print(f"  Description: {self.bot.description}")
+        print(
+            f"  Docker: {'enabled' if not self.render.no_docker else 'DISABLED (not recommended)'}"
+        )
+        print(
+            f"  OnlineTeX: {'enabled' if self.render.use_onlinetex else 'disabled'}"
+        )
+
 
 # Global config instance (initialized in __main__.py)
 _config: Config | None = None

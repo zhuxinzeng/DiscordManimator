@@ -222,6 +222,38 @@ class TestGlobalConfig:
             get_config()
 
 
+class TestConfigSummary:
+    """Tests for config summary printing."""
+
+    def test_print_summary_default(self, capsys):
+        """Test printing summary with default values."""
+        config = Config(
+            token="test_token_123_this_is_a_valid_discord_bot_token_1234567890"
+        )
+        config.print_summary()
+
+        captured = capsys.readouterr()
+        assert "Command prefix: !" in captured.out
+        assert "Description: Manim Community Discord Bot" in captured.out
+        assert "Docker: enabled" in captured.out
+        assert "OnlineTeX: disabled" in captured.out
+
+    def test_print_summary_custom(self, capsys):
+        """Test printing summary with custom values."""
+        config = Config(
+            token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
+            bot={"prefix": "?", "description": "Custom Bot"},
+            render={"use_onlinetex": True, "no_docker": True},
+        )
+        config.print_summary()
+
+        captured = capsys.readouterr()
+        assert "Command prefix: ?" in captured.out
+        assert "Description: Custom Bot" in captured.out
+        assert "Docker: DISABLED (not recommended)" in captured.out
+        assert "OnlineTeX: enabled" in captured.out
+
+
 class TestEnvironmentVariables:
     """Tests for environment variable overrides."""
     
