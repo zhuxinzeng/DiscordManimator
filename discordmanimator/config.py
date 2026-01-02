@@ -46,11 +46,15 @@ class RenderConfig(BaseModel):
     """Configuration for Manim rendering.
 
     Attributes:
-        no_docker: Whether to disable Docker for rendering (not recommended)
+        disable_docker: Whether to disable Docker for rendering (not recommended)
         use_onlinetex: Whether to use manim-onlinetex for LaTeX rendering
+        view_timeout: Timeout in seconds for button view before it's removed
+        container_timeout: Timeout in seconds for Docker container execution
+        render_quality: Default render quality (l=low, m=medium, h=high, k=4k)
+        docker_image: Docker image to use for rendering
     """
 
-    no_docker: bool = Field(
+    disable_docker: bool = Field(
         default=False,
         description="Disable Docker for rendering (not recommended for security)",
     )
@@ -58,6 +62,32 @@ class RenderConfig(BaseModel):
     use_onlinetex: bool = Field(
         default=False,
         description="Whether to use manim-onlinetex for LaTeX rendering",
+    )
+
+    view_timeout: int = Field(
+        default=120,
+        description="Timeout in seconds for button view before it's removed",
+        ge=10,
+        le=900,  # Discord's max interaction timeout is 15 minutes
+    )
+
+    container_timeout: int = Field(
+        default=120,
+        description="Timeout in seconds for Docker container execution",
+        ge=10,
+        le=600,  # Max 10 minutes to prevent abuse
+    )
+
+    render_quality: str = Field(
+        default="m",
+        description="Default render quality (l=low, m=medium, h=high, k=4k)",
+        pattern="^[lmhk]$",
+    )
+
+    docker_image: str = Field(
+        default="manimcommunity/manim:stable",
+        description="Docker image to use for rendering",
+        min_length=1,
     )
 
 
@@ -128,7 +158,7 @@ class Config(BaseSettings):
     def model_post_init(self, __context: Any) -> None:
         """Post-initialization validation."""
         # Warn if Docker is disabled
-        if self.render.no_docker:
+        if self.render.disable_docker:
             logging.warning(
                 "Docker is disabled! This is NOT RECOMMENDED for security. "
                 "User code will run directly on your system."
@@ -209,11 +239,14 @@ class Config(BaseSettings):
         print(f"  Command prefix: {self.bot.prefix}")
         print(f"  Description: {self.bot.description}")
         print(
-            f"  Docker: {'enabled' if not self.render.no_docker else 'DISABLED (not recommended)'}"
+            f"  Docker: {'enabled' if not self.render.disable_docker else 'DISABLED (not recommended)'}"
         )
-        print(
-            f"  OnlineTeX: {'enabled' if self.render.use_onlinetex else 'disabled'}"
-        )
+        if not self.render.disable_docker:
+            print(f"  Docker image: {self.render.docker_image}")
+            print(f"  Container timeout: {self.render.container_timeout}s")
+        print(f"  OnlineTeX: {'enabled' if self.render.use_onlinetex else 'disabled'}")
+        print(f"  Default quality: {self.render.render_quality}")
+        print(f"  View timeout: {self.render.view_timeout}s")
 
 
 # Global config instance (initialized in __main__.py)

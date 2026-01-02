@@ -1,7 +1,6 @@
 """Tests for the main entry point."""
 
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -136,7 +135,7 @@ description = "Test Bot"
 
 [render]
 use_onlinetex = true
-no_docker = false
+disable_docker = false
 """
         )
 
@@ -175,7 +174,7 @@ no_docker = false
 token = "valid_token_1234567890_abcdefghijklmnopqrstuvwxyz123456"
 
 [render]
-no_docker = true
+disable_docker = true
 """
         )
 

@@ -48,7 +48,9 @@ def main() -> None:
             print(
                 "\nEdit the file and replace 'paste_your_bot_token_here' with your actual token."
             )
-            print("You can get a token from: https://discord.com/developers/applications")
+            print(
+                "You can get a token from: https://discord.com/developers/applications"
+            )
             return
         except Exception as e:
             print(f"✗ Error generating example: {e}", file=sys.stderr)

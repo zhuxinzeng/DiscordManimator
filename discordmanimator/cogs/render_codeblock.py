@@ -15,8 +15,7 @@ from discord.ext import commands
 
 from ..config import get_config
 
-# time in seconds after which view (= button row) is removed
-VIEW_TIMEOUT = 120
+logger = logging.getLogger(__name__)
 
 
 class RenderCodeblock(commands.Cog):
@@ -31,7 +30,7 @@ class RenderCodeblock(commands.Cog):
             return
 
         if extract_manim_snippets(message.content):
-            view = RenderView(timeout=VIEW_TIMEOUT)
+            view = RenderView(timeout=self.config.render.view_timeout)
             message = await message.reply(
                 "This message looks like it contains a Manim snippet, "
                 "do you want me to render it?",
@@ -114,7 +113,8 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
             cli_flags = response.pop("cli_flags")
             if cli_flags:
                 response["content"] += f"\n\nPassed CLI flags: `{cli_flags}`"
-            view = RenderView(timeout=VIEW_TIMEOUT)
+            config = get_config()
+            view = RenderView(timeout=config.render.view_timeout)
             view.children[0].label = "Render again"
             message = await interaction.followup.edit_message(
                 message_id=interaction.message.id, view=view, **response
@@ -143,7 +143,7 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
     config = get_config()
 
     # Check if Docker is disabled
-    if config.render.no_docker:
+    if config.render.disable_docker:
         return {
             "content": "Docker rendering is disabled. Cannot render animations.",
             "cli_flags": cli_flags,
@@ -177,12 +177,12 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
             reply_args = None
             container = await dockerclient.containers.run(
                 config={
-                    "Image": "manimcommunity/manim:stable",
+                    "Image": config.render.docker_image,
                     "Cmd": [
                         "timeout",
-                        "120",
+                        str(config.render.container_timeout),
                         "manim",
-                        "--quality=m",
+                        f"--quality={config.render.render_quality}",
                         "--disable_caching",
                         "--progress_bar=none",
                         "--output_file=scriptoutput",

@@ -1,4 +1,5 @@
 """Tests for cogs using the configuration system."""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -27,7 +28,7 @@ def test_config():
     """Create and set a test configuration."""
     config = Config(
         token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
-        render={"use_onlinetex": True, "no_docker": False},
+        render={"use_onlinetex": True, "disable_docker": False},
     )
     set_config(config)
     return config
@@ -37,11 +38,13 @@ def test_config():
 def mock_docker_render():
     """Context manager to mock Docker rendering infrastructure.
 
-    Yields a tuple of (mock_file, result_awaitable) where:
+    Yields a tuple of (mock_file, mock_docker) where:
     - mock_file: Can be used to inspect what was written
-    - result_awaitable: The coroutine to await for render_animation_snippet
+    - mock_docker: The mocked Docker client (to inspect container.run calls)
     """
-    with patch("discordmanimator.cogs.render_codeblock.aiodocker.Docker") as mock_docker_class:
+    with patch(
+        "discordmanimator.cogs.render_codeblock.aiodocker.Docker"
+    ) as mock_docker_class:
         mock_docker = AsyncMock()
         mock_docker_class.return_value = mock_docker
 
@@ -62,7 +65,19 @@ def mock_docker_render():
                 with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
                     mock_tmpdir.return_value.__enter__.return_value = "/tmp/test"
 
-                    yield mock_file
+                    yield mock_file, mock_docker
+
+
+def create_simple_message():
+    """Create a mock message with a simple Manim snippet."""
+    mock_message = MagicMock()
+    mock_message.content = """
+```python
+def construct(self):
+    self.play(Create(Square()))
+```
+"""
+    return mock_message
 
 
 class TestExtractManimSnippets:
@@ -128,22 +143,16 @@ class TestRenderAnimationSnippet:
     """Tests for render_animation_snippet function."""
 
     @pytest.mark.asyncio
-    async def test_docker_disabled(self, test_config):
+    async def test_docker_disabled(self):
         """Test that rendering fails gracefully when Docker is disabled."""
-        # Update config to disable Docker
+        # Create config with Docker disabled
         config = Config(
             token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
-            render={"no_docker": True},
+            render={"disable_docker": True},
         )
         set_config(config)
 
-        mock_message = MagicMock()
-        mock_message.content = """
-```python
-def construct(self):
-    self.play(Create(Square()))
-```
-"""
+        mock_message = create_simple_message()
 
         result = await render_animation_snippet(mock_message)
 
@@ -153,15 +162,9 @@ def construct(self):
     @pytest.mark.asyncio
     async def test_uses_onlinetex_config(self, test_config):
         """Test that onlinetex config is respected."""
-        mock_message = MagicMock()
-        mock_message.content = """
-```python
-def construct(self):
-    self.play(Create(Square()))
-```
-"""
+        mock_message = create_simple_message()
 
-        with mock_docker_render() as mock_file:
+        with mock_docker_render() as (mock_file, _):
             await render_animation_snippet(mock_message)
 
             # Verify the script was written with onlinetex import
@@ -176,19 +179,13 @@ def construct(self):
         """Test that onlinetex is not imported when disabled."""
         config = Config(
             token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
-            render={"use_onlinetex": False, "no_docker": False},
+            render={"use_onlinetex": False, "disable_docker": False},
         )
         set_config(config)
 
-        mock_message = MagicMock()
-        mock_message.content = """
-```python
-def construct(self):
-    self.play(Create(Square()))
-```
-"""
+        mock_message = create_simple_message()
 
-        with mock_docker_render() as mock_file:
+        with mock_docker_render() as (mock_file, _):
             await render_animation_snippet(mock_message)
 
             # Verify the script was written without onlinetex import
@@ -197,3 +194,61 @@ def construct(self):
                 written_content = write_calls[0][0][0]
                 assert "from manim import *" in written_content
                 assert "from manim_onlinetex import *" not in written_content
+
+    @pytest.mark.asyncio
+    async def test_uses_custom_docker_image(self):
+        """Test that custom docker image config is used."""
+        config = Config(
+            token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
+            render={"disable_docker": False, "docker_image": "custom/manim:test"},
+        )
+        set_config(config)
+
+        mock_message = create_simple_message()
+
+        with mock_docker_render() as (_, mock_docker):
+            await render_animation_snippet(mock_message)
+
+            # Check that the custom image was used
+            call_args = mock_docker.containers.run.call_args
+            assert call_args[1]["config"]["Image"] == "custom/manim:test"
+
+    @pytest.mark.asyncio
+    async def test_uses_custom_quality(self):
+        """Test that custom quality config is used."""
+        config = Config(
+            token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
+            render={"disable_docker": False, "render_quality": "h"},
+        )
+        set_config(config)
+
+        mock_message = create_simple_message()
+
+        with mock_docker_render() as (_, mock_docker):
+            await render_animation_snippet(mock_message)
+
+            # Check that the custom quality was used
+            call_args = mock_docker.containers.run.call_args
+            cmd = call_args[1]["config"]["Cmd"]
+            assert "--quality=h" in cmd
+
+    @pytest.mark.asyncio
+    async def test_uses_custom_container_timeout(self):
+        """Test that custom container timeout config is used."""
+        config = Config(
+            token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
+            render={"disable_docker": False, "container_timeout": 180},
+        )
+        set_config(config)
+
+        mock_message = create_simple_message()
+
+        with mock_docker_render() as (_, mock_docker):
+            await render_animation_snippet(mock_message)
+
+            # Check that the custom timeout was used
+            call_args = mock_docker.containers.run.call_args
+            cmd = call_args[1]["config"]["Cmd"]
+            # The timeout command should have "180" as its argument
+            timeout_idx = cmd.index("timeout")
+            assert cmd[timeout_idx + 1] == "180"
