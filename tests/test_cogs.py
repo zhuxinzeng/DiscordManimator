@@ -46,17 +46,26 @@ def mock_docker_render():
         "discordmanimator.cogs.render_codeblock.aiodocker.Docker"
     ) as mock_docker_class:
         mock_docker = AsyncMock()
+        # Support async context manager protocol
+        mock_docker.__aenter__ = AsyncMock(return_value=mock_docker)
+        mock_docker.__aexit__ = AsyncMock(return_value=None)
         mock_docker_class.return_value = mock_docker
 
+        # Create an async iterator for container.log()
+        async def mock_log_iterator():
+            return
+            yield  # Make this a generator but yield nothing
+
         mock_container = AsyncMock()
-        mock_container.log = AsyncMock()
-        mock_container.log.return_value.__aiter__ = AsyncMock(return_value=iter([]))
+        mock_container.log = MagicMock(return_value=mock_log_iterator())
 
         mock_docker.containers.run = AsyncMock(return_value=mock_container)
         mock_docker.close = AsyncMock()
 
         with patch("pathlib.Path.rglob") as mock_rglob:
-            mock_rglob.return_value = [MagicMock(spec="Path")]
+            mock_path = MagicMock()
+            mock_path.name = "scriptoutput.mp4"
+            mock_rglob.return_value = [mock_path]
 
             with patch("builtins.open", create=True) as mock_open:
                 mock_file = MagicMock()
