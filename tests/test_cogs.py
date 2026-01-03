@@ -10,9 +10,9 @@ from pydantic import SecretStr
 
 from discordmanimator.cogs.render_codeblock import (
     RenderCodeblock,
-    extract_manim_snippets,
     render_animation_snippet,
 )
+from discordmanimator.snippet_parser import extract_snippet_from_message
 from discordmanimator.config import Config, reset_config, set_config
 
 
@@ -91,7 +91,7 @@ def construct(self):
 
 
 class TestExtractManimSnippets:
-    """Tests for extract_manim_snippets function."""
+    """Tests for extract_snippet_from_message function."""
 
     def test_extract_simple_snippet(self):
         """Test extracting a simple snippet."""
@@ -101,7 +101,7 @@ def construct(self):
     self.play(Create(Square()))
 ```
 """
-        result = extract_manim_snippets(message)
+        result = extract_snippet_from_message(message)
         assert result
         assert "def construct(self):" in result[0]
 
@@ -114,14 +114,14 @@ class MyScene(Scene):
         self.play(Create(Circle()))
 ```
 """
-        result = extract_manim_snippets(message)
+        result = extract_snippet_from_message(message)
         assert result
         assert "class MyScene(Scene):" in result[0]
 
     def test_no_snippet(self):
         """Test message without snippets."""
         message = "Just a regular message"
-        result = extract_manim_snippets(message)
+        result = extract_snippet_from_message(message)
         assert result == []
 
     def test_snippet_without_construct(self):
@@ -132,8 +132,36 @@ def some_function():
     pass
 ```
 """
-        result = extract_manim_snippets(message)
+        result = extract_snippet_from_message(message)
         assert result == []
+
+    def test_snippet_with_imports(self):
+        """Test extracting snippet with imports before construct."""
+        message = """
+```python
+import numpy as np
+from scipy import stats
+
+def construct(self):
+    self.play(Create(Square()))
+```
+"""
+        result = extract_snippet_from_message(message)
+        assert result
+        assert "import numpy as np" in result[0]
+        assert "def construct(self):" in result[0]
+
+    def test_snippet_with_scene_parameter(self):
+        """Test extracting snippet with 'scene' parameter instead of 'self'."""
+        message = """
+```python
+def animate(scene):
+    scene.play(Create(Square()))
+```
+"""
+        result = extract_snippet_from_message(message)
+        assert result
+        assert "def animate(scene):" in result[0]
 
 
 class TestRenderCodeblock:
