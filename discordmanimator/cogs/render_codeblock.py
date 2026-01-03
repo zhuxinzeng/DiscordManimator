@@ -49,25 +49,19 @@ class RenderView(discord.ui.View):
         style=discord.ButtonStyle.blurple,
     )
     async def render(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Disable buttons during render
         for child in self.children:
             child.disabled = True
         await self.message.edit(view=self)
+
         await interaction.response.defer()
         async with interaction.channel.typing():
-            code_message = await interaction.channel.fetch_message(
-                interaction.message.reference.message_id
-            )
-            response = await render_animation_snippet(
-                code_message, interaction=interaction
-            )
-            response.pop("cli_flags")
+            response, view = await handle_render_request(interaction)
 
-            button.label = "Render again"
-            for child in self.children:
-                child.disabled = False
-            await interaction.followup.edit_message(
-                message_id=interaction.message.id, view=self, **response
+            message = await interaction.followup.edit_message(
+                message_id=interaction.message.id, view=view, **response
             )
+            view.message = message
 
     @discord.ui.button(
         label="Change settings",
@@ -108,24 +102,14 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        # CLI flag validation now happens in build_container_config()
-        # We just pass the flags through and let render_animation_snippet handle it
         await interaction.response.defer()
         async with interaction.channel.typing():
-            code_message = await interaction.channel.fetch_message(
-                interaction.message.reference.message_id
-            )
-            response = await render_animation_snippet(
-                code_message,
+            response, view = await handle_render_request(
+                interaction,
                 cli_flags=self.CLI_flags.value.split(),
-                interaction=interaction,
+                show_cli_flags_in_response=True,
             )
-            cli_flags = response.pop("cli_flags")
-            if cli_flags:
-                response["content"] += f"\n\nPassed CLI flags: `{cli_flags}`"
-            config = get_config()
-            view = RenderView(timeout=config.render.view_timeout)
-            view.children[0].label = "Render again"
+
             message = await interaction.followup.edit_message(
                 message_id=interaction.message.id, view=view, **response
             )
@@ -135,6 +119,48 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
 def extract_manim_snippets(msg) -> None | str:
     pattern = re.compile(r"```(?:python|py)?([^`]*def construct[^`]*)```")
     return pattern.findall(msg)
+
+
+async def handle_render_request(
+    interaction: discord.Interaction,
+    cli_flags: list[str] | None = None,
+    show_cli_flags_in_response: bool = False,
+) -> tuple[dict[str, Any], discord.ui.View]:
+    """Handle a render request from a button or modal interaction.
+
+    Fetches the code message, renders it, and prepares the response with a fresh view.
+
+    Args:
+        interaction: Discord interaction triggering the render
+        cli_flags: Optional CLI flags to pass to manim
+        show_cli_flags_in_response: Whether to append CLI flags to response content
+
+    Returns:
+        Tuple of (response_dict, view) ready to use with followup.edit_message
+    """
+    # Fetch code message from reference
+    code_message = await interaction.channel.fetch_message(
+        interaction.message.reference.message_id
+    )
+
+    # Render the snippet
+    response = await render_animation_snippet(
+        code_message,
+        cli_flags=cli_flags,
+        interaction=interaction,
+    )
+
+    # Process response
+    cli_flags_used = response.pop("cli_flags")
+    if show_cli_flags_in_response and cli_flags_used:
+        response["content"] += f"\n\nPassed CLI flags: `{cli_flags_used}`"
+
+    # Create fresh view with updated button label
+    config = get_config()
+    view = RenderView(timeout=config.render.view_timeout)
+    view.children[0].label = "Render again"
+
+    return response, view
 
 
 def prepare_snippet(raw_content: str, config) -> list[str]:
