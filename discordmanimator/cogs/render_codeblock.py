@@ -108,22 +108,8 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        if any(
-            ch in self.CLI_flags.value for ch in [";", "&", "|", "$", ">", "<", "`"]
-        ):
-            logger.warning(
-                "Invalid CLI flags rejected",
-                extra={
-                    "user_id": interaction.user.id,
-                    "reason": "contains_forbidden_characters",
-                },
-            )
-            await interaction.response.send_message(
-                "Something went wrong, please try again.",
-                ephemeral=True,
-            )
-            return
-
+        # CLI flag validation now happens in build_container_config()
+        # We just pass the flags through and let render_animation_snippet handle it
         await interaction.response.defer()
         async with interaction.channel.typing():
             code_message = await interaction.channel.fetch_message(
@@ -151,6 +137,218 @@ def extract_manim_snippets(msg) -> None | str:
     return pattern.findall(msg)
 
 
+def prepare_snippet(raw_content: str, config) -> list[str]:
+    """Extract and transform snippet into script lines ready to write.
+
+    Args:
+        raw_content: Raw message content containing code snippet
+        config: Bot configuration with render settings
+
+    Returns:
+        List of script lines including imports and snippet code
+    """
+    # Extract first snippet
+    [snippet, *rest] = extract_manim_snippets(raw_content)
+    snippet = snippet.strip()
+
+    # Transform snippet: wrap bare construct() methods in class
+    if snippet.startswith("def construct(self):"):
+        snippet_lines = ["class Manimation(Scene):"] + [
+            "    " + line for line in snippet.split("\n")
+        ]
+    else:
+        snippet_lines = snippet.split("\n")
+
+    # Build script with imports
+    prescript = ["from manim import *"]
+    if config.render.use_onlinetex:
+        prescript.append("from manim_onlinetex import *")
+
+    return prescript + snippet_lines
+
+
+def build_container_config(
+    script_dir: str, cli_flags: list[str], config
+) -> dict[str, Any]:
+    """Build Docker container configuration for rendering.
+
+    Args:
+        script_dir: Path to directory containing script.py
+        cli_flags: List of CLI flags to pass to manim
+        config: Bot configuration with render settings
+
+    Returns:
+        Docker container configuration dict
+
+    Raises:
+        ValueError: If cli_flags contain forbidden characters
+    """
+    # Security validation: check for shell injection characters
+    if cli_flags:
+        forbidden_chars = [";", "&", "|", "$", ">", "<", "`"]
+        cli_flags_str = " ".join(cli_flags)
+        if any(ch in cli_flags_str for ch in forbidden_chars):
+            raise ValueError(
+                f"CLI flags contain forbidden characters: {forbidden_chars}"
+            )
+
+    return {
+        "Image": config.render.docker_image,
+        "Cmd": [
+            "timeout",
+            str(config.render.container_timeout),
+            "manim",
+            f"--quality={config.render.render_quality}",
+            "--disable_caching",
+            "--progress_bar=none",
+            "--output_file=scriptoutput",
+            *cli_flags,
+            "/manim/script.py",
+        ],
+        "User": str(os.getuid()),
+        "HostConfig": {
+            "Binds": [f"{script_dir}:/manim/:rw"],
+            "AutoRemove": True,
+        },
+    }
+
+
+async def execute_render(container_config: dict) -> None:
+    """Execute Docker container and check for Manim errors.
+
+    Args:
+        container_config: Docker container configuration
+
+    Raises:
+        ManimError: If Manim reports errors on stderr
+        aiodocker.DockerError: If Docker execution fails
+    """
+    async with aiodocker.Docker() as dockerclient:
+        container = await dockerclient.containers.run(config=container_config)
+        manim_stderr = [
+            line.rstrip() async for line in container.log(follow=True, stderr=True)
+        ]
+        # `follow=True` allows keeping the stream open until the container stops
+
+    if manim_stderr:
+        raise ManimError(traceback=manim_stderr)
+
+
+def find_output_file(directory: Path) -> Path:
+    """Locate and validate the rendered output file.
+
+    Args:
+        directory: Directory to search for output file
+
+    Returns:
+        Path to the output file
+
+    Raises:
+        FileNotFoundError: If no output file is found
+        ValueError: If multiple output files are found
+    """
+    output_files = list(directory.rglob("scriptoutput.*"))
+    num_files = len(output_files)
+
+    if num_files == 0:
+        raise FileNotFoundError(
+            "No output file was produced. :cry:\n\n"
+            "This usually means the scene didn't render successfully. "
+            "Check the error log above for details."
+        )
+
+    if num_files > 1:
+        file_names = [f.name for f in output_files]
+        raise ValueError(
+            f"Multiple output files found ({num_files}). "
+            f"Expected exactly one output file, but found: {', '.join(file_names)}"
+        )
+
+    return output_files[0]
+
+
+def format_render_response(
+    output_file: Path | None,
+    error: Exception | None,
+    cli_flags: list[str],
+) -> dict[str, Any]:
+    """Format response dict for Discord based on render result.
+
+    Args:
+        output_file: Path to rendered output file (if successful)
+        error: Exception if render failed (if unsuccessful)
+        cli_flags: CLI flags used for rendering
+
+    Returns:
+        Dictionary with content, cli_flags, and optional attachments
+    """
+    if output_file is not None:
+        # Success case
+        return {
+            "content": "Here you go!",
+            "cli_flags": cli_flags,
+            "attachments": [discord.File(output_file)],
+        }
+
+    # Error cases
+    if isinstance(error, ManimError):
+        return {
+            "content": "Something went wrong! :cry: Here is what Manim reports.",
+            "cli_flags": cli_flags,
+            "attachments": [
+                discord.File(
+                    fp=io.StringIO(error.traceback),
+                    filename="error.log",
+                ),
+            ],
+        }
+
+    if isinstance(error, aiodocker.DockerContainerError):
+        return {
+            "content": "Something went wrong with the Docker container. :cry:",
+            "cli_flags": cli_flags,
+            "attachments": [
+                discord.File(
+                    fp=io.BytesIO(error.message),
+                    filename="error.log",
+                ),
+            ],
+        }
+
+    if isinstance(error, aiodocker.DockerError):
+        error_msg = f"Docker error: {error}"
+        return {
+            "content": "Could not connect to Docker. :cry:",
+            "cli_flags": cli_flags,
+            "attachments": [
+                discord.File(
+                    fp=io.BytesIO(error_msg.encode()),
+                    filename="error.log",
+                ),
+            ],
+        }
+
+    if isinstance(error, (FileNotFoundError, ValueError)):
+        # Output file validation errors
+        return {
+            "content": f"{str(error)} :cry:",
+            "cli_flags": cli_flags,
+        }
+
+    # Unexpected error
+    tb = traceback.format_exception(type(error), error, error.__traceback__)
+    return {
+        "content": "An unexpected error occurred. :cry:",
+        "cli_flags": cli_flags,
+        "attachments": [
+            discord.File(
+                fp=io.BytesIO("".join(tb).encode()),
+                filename="error.log",
+            ),
+        ],
+    }
+
+
 async def render_animation_snippet(
     code_message, cli_flags=None, interaction=None
 ) -> dict[str, Any]:
@@ -173,7 +371,7 @@ async def render_animation_snippet(
 
     config = get_config()
 
-    # Log render request with minimal metadata
+    # Set up logging context
     log_extra = {
         "snippet_lines": len(code_message.content.split("\n")),
         "has_cli_flags": bool(cli_flags),
@@ -198,122 +396,77 @@ async def render_animation_snippet(
             "cli_flags": cli_flags,
         }
 
-    # theoretically, multiple snippets could be rendered
-    # at once. for now, we'll just choose and render the
-    # first one.
-    [snippet, *rest] = extract_manim_snippets(code_message.content)
-    snippet = snippet.strip()
+    # Prepare script
+    try:
+        script_lines = prepare_snippet(code_message.content, config)
+    except Exception as e:
+        render_time = time.time() - start_time
+        logger.error(
+            "Render failed: Snippet preparation error",
+            extra={**log_extra, "render_time_seconds": round(render_time, 2)},
+            exc_info=True,
+        )
+        return format_render_response(None, e, cli_flags)
 
-    if snippet.startswith("def construct(self):"):
-        snippet = ["class Manimation(Scene):"] + [
-            "    " + line for line in snippet.split("\n")
-        ]
-    else:
-        snippet = snippet.split("\n")
-
-    prescript = ["from manim import *"]
-    if config.render.use_onlinetex:
-        prescript.append("from manim_onlinetex import *")
-    script = prescript + snippet
-
+    # Execute render with tempdir context
     with tempfile.TemporaryDirectory() as tmpdirname:
+        # Write script to file
         with open(Path(tmpdirname) / "script.py", "w", encoding="utf-8") as f:
-            f.write("\n".join(script))
+            f.write("\n".join(script_lines))
 
+        # Build container configuration with actual script directory
         try:
-            async with aiodocker.Docker() as dockerclient:
-                container = await dockerclient.containers.run(
-                    config={
-                        "Image": config.render.docker_image,
-                        "Cmd": [
-                            "timeout",
-                            str(config.render.container_timeout),
-                            "manim",
-                            f"--quality={config.render.render_quality}",
-                            "--disable_caching",
-                            "--progress_bar=none",
-                            "--output_file=scriptoutput",
-                            *cli_flags,
-                            "/manim/script.py",
-                        ],
-                        "User": str(os.getuid()),
-                        "HostConfig": {
-                            "Binds": [f"{tmpdirname}:/manim/:rw"],
-                            "AutoRemove": True,
-                        },
-                    }
-                )
-                manim_stderr = [
-                    line.rstrip()
-                    async for line in container.log(follow=True, stderr=True)
-                ]
-                # `follow=True` allow to keep the stream open until the container stops
+            container_config = build_container_config(
+                script_dir=tmpdirname,
+                cli_flags=cli_flags,
+                config=config,
+            )
+        except ValueError as e:
+            # CLI flag validation failed
+            render_time = time.time() - start_time
+            logger.warning(
+                "Render blocked: Invalid CLI flags",
+                extra={
+                    **log_extra,
+                    "render_time_seconds": round(render_time, 2),
+                    "error": str(e),
+                },
+            )
+            return {
+                "content": "Something went wrong, please try again.",
+                "cli_flags": cli_flags,
+            }
 
-            if manim_stderr:
-                raise ManimError(traceback=manim_stderr)
-
+        # Execute Docker render
+        try:
+            await execute_render(container_config)
         except ManimError as e:
-            # Manim itself threw an error (expected error case)
             render_time = time.time() - start_time
             logger.info(
                 "Render failed: Manim error",
                 extra={**log_extra, "render_time_seconds": round(render_time, 2)},
             )
-            return {
-                "content": "Something went wrong! :cry: Here is what Manim reports.",
-                "cli_flags": cli_flags,
-                "attachments": [
-                    discord.File(
-                        fp=io.StringIO(e.traceback),
-                        filename="error.log",
-                    ),
-                ],
-            }
-
+            return format_render_response(None, e, cli_flags)
         except aiodocker.DockerContainerError as e:
-            # Docker container execution failed
             render_time = time.time() - start_time
             logger.error(
                 "Render failed: Docker container error",
                 extra={**log_extra, "render_time_seconds": round(render_time, 2)},
                 exc_info=True,
             )
-            return {
-                "content": "Something went wrong with the Docker container. :cry:",
-                "cli_flags": cli_flags,
-                "attachments": [
-                    discord.File(
-                        fp=io.BytesIO(e.message),
-                        filename="error.log",
-                    ),
-                ],
-            }
-
+            return format_render_response(None, e, cli_flags)
         except aiodocker.DockerError as e:
-            # Docker communication error (daemon not running, etc.)
             render_time = time.time() - start_time
             logger.error(
                 "Render failed: Docker daemon error",
                 extra={**log_extra, "render_time_seconds": round(render_time, 2)},
                 exc_info=True,
             )
-            error_msg = f"Docker error: {e}"
-            return {
-                "content": "Could not connect to Docker. :cry:",
-                "cli_flags": cli_flags,
-                "attachments": [
-                    discord.File(
-                        fp=io.BytesIO(error_msg.encode()),
-                        filename="error.log",
-                    ),
-                ],
-            }
-
+            return format_render_response(None, e, cli_flags)
         except Exception as e:
-            # Unexpected error
             render_time = time.time() - start_time
             logger.error(
-                "Render failed: Unexpected error",
+                "Render failed: Unexpected error during execution",
                 extra={
                     **log_extra,
                     "render_time_seconds": round(render_time, 2),
@@ -321,86 +474,43 @@ async def render_animation_snippet(
                 },
                 exc_info=True,
             )
-            tb = traceback.format_exc()
-            return {
-                "content": "An unexpected error occurred. :cry:",
-                "cli_flags": cli_flags,
-                "attachments": [
-                    discord.File(
-                        fp=io.BytesIO(tb.encode()),
-                        filename="error.log",
-                    ),
-                ],
-            }
+            return format_render_response(None, e, cli_flags)
 
-        # Find output file - we expect exactly one file matching scriptoutput.*
-        output_files = list(Path(tmpdirname).rglob("scriptoutput.*"))
-        num_files = len(output_files)
-
-        if num_files == 0:
-            # No output file was produced - likely a rendering error
+        # Find and validate output file
+        try:
+            output_file = find_output_file(Path(tmpdirname))
+        except (FileNotFoundError, ValueError) as e:
             render_time = time.time() - start_time
-            logger.warning(
-                "Render failed: No output file produced",
-                extra={
-                    **log_extra,
-                    "render_time_seconds": round(render_time, 2),
-                    "expected_pattern": "scriptoutput.*",
-                },
-            )
-            return {
-                "content": (
-                    "No output file was produced. :cry:\n\n"
-                    "This usually means the scene didn't render successfully. "
-                    "Check the error log above for details."
-                ),
-                "cli_flags": cli_flags,
-            }
+            log_level = logger.warning
+            extra_data = {**log_extra, "render_time_seconds": round(render_time, 2)}
 
-        if num_files > 1:
-            # Multiple output files found - unexpected, log details for debugging
-            render_time = time.time() - start_time
-            file_names = [f.name for f in output_files]
-            logger.warning(
-                "Render failed: Multiple output files found",
-                extra={
-                    **log_extra,
-                    "render_time_seconds": round(render_time, 2),
-                    "file_count": num_files,
-                    "file_names": file_names,
-                },
-            )
-            return {
-                "content": (
-                    f"Multiple output files found ({num_files}). :cry:\n\n"
-                    f"Expected exactly one output file, but found: "
-                    f"{', '.join(file_names)}\n\n"
-                    "This is unexpected - please report this issue."
-                ),
-                "cli_flags": cli_flags,
-            }
+            if isinstance(e, FileNotFoundError):
+                log_level(
+                    "Render failed: No output file produced",
+                    extra={**extra_data, "expected_pattern": "scriptoutput.*"},
+                )
+            else:
+                # ValueError - multiple files
+                log_level(
+                    "Render failed: Multiple output files found", extra=extra_data
+                )
 
-        # Success case - exactly one output file
-        outfilepath = output_files[0]
+            return format_render_response(None, e, cli_flags)
+
+        # Success!
         render_time = time.time() - start_time
-        file_size_kb = outfilepath.stat().st_size / 1024
+        file_size_kb = output_file.stat().st_size / 1024
 
         logger.info(
             "Render completed successfully",
             extra={
                 **log_extra,
                 "render_time_seconds": round(render_time, 2),
-                "output_file": outfilepath.name,
+                "output_file": output_file.name,
                 "file_size_kb": round(file_size_kb, 2),
             },
         )
-        return {
-            "content": "Here you go!",
-            "cli_flags": cli_flags,
-            "attachments": [
-                discord.File(outfilepath),
-            ],
-        }
+        return format_render_response(output_file, None, cli_flags)
 
 
 async def setup(bot: commands.Bot):
