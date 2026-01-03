@@ -108,7 +108,9 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
     )
 
     async def on_submit(self, interaction: discord.Interaction):
-        if ";" in self.CLI_flags.value or "&" in self.CLI_flags.value:
+        if any(
+            ch in self.CLI_flags.value for ch in [";", "&", "|", "$", ">", "<", "`"]
+        ):
             logger.warning(
                 "Invalid CLI flags rejected",
                 extra={
