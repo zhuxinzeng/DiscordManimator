@@ -13,7 +13,7 @@ import aiodocker
 import discord
 from discord.ext import commands
 
-from ..config import get_config
+from ..config import Config, get_config
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class RenderCodeblock(commands.Cog):
         self.config = get_config()
 
     @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
+    async def on_message(self, message: discord.Message) -> None:
         if message.author.id == self.bot.user.id:
             return
 
@@ -40,7 +40,9 @@ class RenderCodeblock(commands.Cog):
 
 
 class RenderView(discord.ui.View):
-    def __init__(self, *args, **kwargs):
+    message: discord.Message  # Will be set after creation
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self.message_deleted = False
 
@@ -48,7 +50,9 @@ class RenderView(discord.ui.View):
         label="Yes, render",
         style=discord.ButtonStyle.blurple,
     )
-    async def render(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def render(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ) -> None:
         # Disable buttons during render
         for child in self.children:
             child.disabled = True
@@ -69,7 +73,7 @@ class RenderView(discord.ui.View):
     )
     async def change_settings(
         self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
+    ) -> None:
         await interaction.response.send_modal(SettingsModal())
 
     @discord.ui.button(
@@ -80,11 +84,11 @@ class RenderView(discord.ui.View):
         self,
         interaction: discord.Interaction,
         button: discord.ui.Button,
-    ):
+    ) -> None:
         self.message_deleted = True
         await interaction.message.delete()
 
-    async def on_timeout(self):
+    async def on_timeout(self) -> None:
         if self.message_deleted:
             return
         try:
@@ -101,7 +105,7 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
         required=False,
     )
 
-    async def on_submit(self, interaction: discord.Interaction):
+    async def on_submit(self, interaction: discord.Interaction) -> None:
         await interaction.response.defer()
         async with interaction.channel.typing():
             response, view = await handle_render_request(
@@ -116,7 +120,7 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
             view.message = message
 
 
-def extract_manim_snippets(msg) -> None | str:
+def extract_manim_snippets(msg: str) -> list[str]:
     pattern = re.compile(r"```(?:python|py)?([^`]*def construct[^`]*)```")
     return pattern.findall(msg)
 
@@ -193,7 +197,7 @@ def _parse_memory_string(memory_str: str) -> int:
         raise ValueError(f"Invalid memory string format: {memory_str}")
 
 
-def prepare_snippet(raw_content: str, config) -> list[str]:
+def prepare_snippet(raw_content: str, config: Config) -> list[str]:
     """Extract and transform snippet into script lines ready to write.
 
     Args:
@@ -224,7 +228,7 @@ def prepare_snippet(raw_content: str, config) -> list[str]:
 
 
 def build_container_config(
-    script_dir: str, cli_flags: list[str], config
+    script_dir: str, cli_flags: list[str], config: Config
 ) -> dict[str, Any]:
     """Build Docker container configuration for rendering.
 
@@ -270,7 +274,7 @@ def build_container_config(
     }
 
 
-async def execute_render(container_config: dict) -> None:
+async def execute_render(container_config: dict[str, Any]) -> None:
     """Execute Docker container and check for Manim errors.
 
     Args:
@@ -354,19 +358,25 @@ def format_render_response(
             "cli_flags": cli_flags,
             "attachments": [
                 discord.File(
-                    fp=io.StringIO(error.traceback),
+                    fp=io.BytesIO(error.traceback.encode()),
                     filename="error.log",
                 ),
             ],
         }
 
     if isinstance(error, aiodocker.DockerContainerError):
+        # error.message could be bytes or str, ensure bytes
+        error_bytes = (
+            error.message
+            if isinstance(error.message, bytes)
+            else error.message.encode()
+        )
         return {
             "content": "Something went wrong with the Docker container. :cry:",
             "cli_flags": cli_flags,
             "attachments": [
                 discord.File(
-                    fp=io.BytesIO(error.message),
+                    fp=io.BytesIO(error_bytes),
                     filename="error.log",
                 ),
             ],
@@ -393,6 +403,12 @@ def format_render_response(
         }
 
     # Unexpected error
+    if error is None:
+        return {
+            "content": "An unexpected error occurred (error was None). :cry:",
+            "cli_flags": cli_flags,
+        }
+
     tb = traceback.format_exception(type(error), error, error.__traceback__)
     return {
         "content": "An unexpected error occurred. :cry:",
@@ -407,7 +423,9 @@ def format_render_response(
 
 
 async def render_animation_snippet(
-    code_message, cli_flags=None, interaction=None
+    code_message: discord.Message,
+    cli_flags: list[str] | None = None,
+    interaction: discord.Interaction | None = None,
 ) -> dict[str, Any]:
     """Render a Manim animation snippet from a code message.
 
@@ -570,12 +588,12 @@ async def render_animation_snippet(
         return format_render_response(output_file, None, cli_flags)
 
 
-async def setup(bot: commands.Bot):
+async def setup(bot: commands.Bot) -> None:
     """Entrypoint of loading the bot extension."""
     await bot.add_cog(RenderCodeblock(bot))
     logging.info("RenderCodeblock cog has been added.")
 
 
 class ManimError(ChildProcessError):
-    def __init__(self, traceback: list[str]):
+    def __init__(self, traceback: list[str]) -> None:
         self.traceback = "\n".join(traceback)

@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import SecretStr
 
 from discordmanimator.cogs.render_codeblock import (
     RenderCodeblock,
@@ -27,7 +28,7 @@ def reset_global_config():
 def test_config():
     """Create and set a test configuration."""
     config = Config(
-        token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
+        token=SecretStr("test_token_123_this_is_a_valid_discord_bot_token_1234567890"),
         render={"use_onlinetex": True, "disable_docker": False},
     )
     set_config(config)

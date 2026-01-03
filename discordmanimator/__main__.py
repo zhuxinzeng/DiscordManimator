@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from pydantic import ValidationError
+from pydantic import ValidationError, SecretStr
 
 from .config import Config, set_config
 from .DiscordManimator import create_and_run_bot
@@ -46,7 +46,9 @@ def main() -> None:
         try:
             # Create config with dummy token to get defaults
             dummy_config = Config(
-                token="irrelevant and just needs to be long enough to pass validation"
+                token=SecretStr(
+                    "irrelevant and just needs to be long enough to pass validation"
+                )
             )
             dummy_config.save_example(args.configfile)
             print(f"✓ Example configuration saved to: {args.configfile}")
