@@ -10,10 +10,15 @@ from pydantic import ValidationError
 
 from .config import Config, set_config
 from .DiscordManimator import create_and_run_bot
+from .logging_config import setup_logging_with_extra_fields
 
 
 def main() -> None:
     """Main entry point for the bot."""
+
+    # Set up logging with support for structured extra fields
+    setup_logging_with_extra_fields()
+
     parser = argparse.ArgumentParser(
         prog="DiscordManimator",
         description="Discord bot for rendering Manim animations",

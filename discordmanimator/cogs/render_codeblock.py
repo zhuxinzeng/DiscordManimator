@@ -57,7 +57,9 @@ class RenderView(discord.ui.View):
             code_message = await interaction.channel.fetch_message(
                 interaction.message.reference.message_id
             )
-            response = await render_animation_snippet(code_message)
+            response = await render_animation_snippet(
+                code_message, interaction=interaction
+            )
             response.pop("cli_flags")
 
             button.label = "Render again"
@@ -107,6 +109,13 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
 
     async def on_submit(self, interaction: discord.Interaction):
         if ";" in self.CLI_flags.value or "&" in self.CLI_flags.value:
+            logger.warning(
+                "Invalid CLI flags rejected",
+                extra={
+                    "user_id": interaction.user.id,
+                    "reason": "contains_forbidden_characters",
+                },
+            )
             await interaction.response.send_message(
                 "Something went wrong, please try again.",
                 ephemeral=True,
@@ -119,7 +128,9 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
                 interaction.message.reference.message_id
             )
             response = await render_animation_snippet(
-                code_message, cli_flags=self.CLI_flags.value.split()
+                code_message,
+                cli_flags=self.CLI_flags.value.split(),
+                interaction=interaction,
             )
             cli_flags = response.pop("cli_flags")
             if cli_flags:
@@ -138,23 +149,48 @@ def extract_manim_snippets(msg) -> None | str:
     return pattern.findall(msg)
 
 
-async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, Any]:
+async def render_animation_snippet(
+    code_message, cli_flags=None, interaction=None
+) -> dict[str, Any]:
     """Render a Manim animation snippet from a code message.
 
     Args:
         code_message: Discord message containing the code snippet
         cli_flags: Optional list of CLI flags to pass to manim
+        interaction: Optional Discord interaction for logging context
 
     Returns:
         Dictionary with response content and attachments
     """
+    import time
+
+    start_time = time.time()
+
     if cli_flags is None:
         cli_flags = []
 
     config = get_config()
 
+    # Log render request with minimal metadata
+    log_extra = {
+        "snippet_lines": len(code_message.content.split("\n")),
+        "has_cli_flags": bool(cli_flags),
+        "cli_flag_count": len(cli_flags) if cli_flags else 0,
+    }
+    if interaction:
+        log_extra.update(
+            {
+                "user_id": interaction.user.id,
+                "guild_id": interaction.guild_id,
+                "channel_id": interaction.channel_id,
+            }
+        )
+
+    logger.info("Render request started", extra=log_extra)
+
     # Check if Docker is disabled
     if config.render.disable_docker:
+        logger.info("Render blocked: Docker disabled", extra=log_extra)
         return {
             "content": "Docker rendering is disabled. Cannot render animations.",
             "cli_flags": cli_flags,
@@ -216,7 +252,11 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
 
         except ManimError as e:
             # Manim itself threw an error (expected error case)
-            logger.info("Manim rendering failed with error")
+            render_time = time.time() - start_time
+            logger.info(
+                "Render failed: Manim error",
+                extra={**log_extra, "render_time_seconds": round(render_time, 2)},
+            )
             return {
                 "content": "Something went wrong! :cry: Here is what Manim reports.",
                 "cli_flags": cli_flags,
@@ -230,7 +270,12 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
 
         except aiodocker.DockerContainerError as e:
             # Docker container execution failed
-            logger.error(f"Docker container error: {e.message}", exc_info=True)
+            render_time = time.time() - start_time
+            logger.error(
+                "Render failed: Docker container error",
+                extra={**log_extra, "render_time_seconds": round(render_time, 2)},
+                exc_info=True,
+            )
             return {
                 "content": "Something went wrong with the Docker container. :cry:",
                 "cli_flags": cli_flags,
@@ -244,7 +289,12 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
 
         except aiodocker.DockerError as e:
             # Docker communication error (daemon not running, etc.)
-            logger.error(f"Docker error: {e}", exc_info=True)
+            render_time = time.time() - start_time
+            logger.error(
+                "Render failed: Docker daemon error",
+                extra={**log_extra, "render_time_seconds": round(render_time, 2)},
+                exc_info=True,
+            )
             error_msg = f"Docker error: {e}"
             return {
                 "content": "Could not connect to Docker. :cry:",
@@ -259,7 +309,16 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
 
         except Exception as e:
             # Unexpected error
-            logger.error(f"Unexpected error during rendering: {e}", exc_info=True)
+            render_time = time.time() - start_time
+            logger.error(
+                "Render failed: Unexpected error",
+                extra={
+                    **log_extra,
+                    "render_time_seconds": round(render_time, 2),
+                    "error_type": type(e).__name__,
+                },
+                exc_info=True,
+            )
             tb = traceback.format_exc()
             return {
                 "content": "An unexpected error occurred. :cry:",
@@ -275,13 +334,25 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
         # Find output file
         output_files = list(Path(tmpdirname).rglob("scriptoutput.*"))
         if len(output_files) == 0:
-            logger.warning("No output file was produced")
+            render_time = time.time() - start_time
+            logger.warning(
+                "Render failed: No output file produced",
+                extra={**log_extra, "render_time_seconds": round(render_time, 2)},
+            )
             return {
                 "content": "No output file was produced. :cry:",
                 "cli_flags": cli_flags,
             }
         elif len(output_files) > 1:
-            logger.warning(f"Multiple output files found: {output_files}")
+            render_time = time.time() - start_time
+            logger.warning(
+                "Render failed: Multiple output files",
+                extra={
+                    **log_extra,
+                    "render_time_seconds": round(render_time, 2),
+                    "file_count": len(output_files),
+                },
+            )
             return {
                 "content": f"Multiple output files found ({len(output_files)}). :cry:",
                 "cli_flags": cli_flags,
@@ -289,7 +360,18 @@ async def render_animation_snippet(code_message, cli_flags=None) -> dict[str, An
 
         # Success case
         outfilepath = output_files[0]
-        logger.info(f"Successfully rendered animation: {outfilepath.name}")
+        render_time = time.time() - start_time
+        file_size_kb = outfilepath.stat().st_size / 1024
+
+        logger.info(
+            "Render completed successfully",
+            extra={
+                **log_extra,
+                "render_time_seconds": round(render_time, 2),
+                "output_file": outfilepath.name,
+                "file_size_kb": round(file_size_kb, 2),
+            },
+        )
         return {
             "content": "Here you go!",
             "cli_flags": cli_flags,
