@@ -24,8 +24,6 @@ def create_and_run_bot() -> commands.Bot:
     intents = discord.Intents.default()
     intents.message_content = True
 
-    discord.utils.setup_logging()
-
     bot = commands.Bot(
         description=config.bot.description,
         activity=discord.Game(config.bot.activity_name),

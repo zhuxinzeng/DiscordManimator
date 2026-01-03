@@ -6,5 +6,10 @@ description = "Manim Community Discord Bot"
 activity_name = "Animating with Manim"
 
 [render]
-no_docker = false
+disable_docker = false
 use_onlinetex = false
+view_timeout = 120
+container_timeout = 120
+render_quality = "m"
+docker_image = "manimcommunity/manim:stable"
+container_memory = "1g"
