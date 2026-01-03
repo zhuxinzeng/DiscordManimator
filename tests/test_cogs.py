@@ -261,3 +261,100 @@ class TestRenderAnimationSnippet:
             # The timeout command should have "180" as its argument
             timeout_idx = cmd.index("timeout")
             assert cmd[timeout_idx + 1] == "180"
+
+    @pytest.mark.asyncio
+    async def test_no_output_file_error(self):
+        """Test error handling when no output file is produced."""
+        config = Config(
+            token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
+            render={"disable_docker": False},
+        )
+        set_config(config)
+
+        mock_message = create_simple_message()
+
+        # Mock Docker but return no output files
+        with patch(
+            "discordmanimator.cogs.render_codeblock.aiodocker.Docker"
+        ) as mock_docker_class:
+            mock_docker = AsyncMock()
+            mock_docker.__aenter__ = AsyncMock(return_value=mock_docker)
+            mock_docker.__aexit__ = AsyncMock(return_value=None)
+            mock_docker_class.return_value = mock_docker
+
+            async def mock_log_iterator():
+                return
+                yield
+
+            mock_container = AsyncMock()
+            mock_container.log = MagicMock(return_value=mock_log_iterator())
+            mock_docker.containers.run = AsyncMock(return_value=mock_container)
+            mock_docker.close = AsyncMock()
+
+            # Mock rglob to return empty list (no output files)
+            with patch("pathlib.Path.rglob") as mock_rglob:
+                mock_rglob.return_value = []
+
+                with patch("builtins.open", create=True):
+                    with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                        mock_tmpdir.return_value.__enter__.return_value = "/tmp/test"
+
+                        result = await render_animation_snippet(mock_message)
+
+                        assert "No output file was produced" in result["content"]
+                        assert "Check the error log" in result["content"]
+                        assert result["cli_flags"] == []
+                        assert "attachments" not in result
+
+    @pytest.mark.asyncio
+    async def test_multiple_output_files_error(self):
+        """Test error handling when multiple output files are found."""
+        config = Config(
+            token="test_token_123_this_is_a_valid_discord_bot_token_1234567890",
+            render={"disable_docker": False},
+        )
+        set_config(config)
+
+        mock_message = create_simple_message()
+
+        # Mock Docker but return multiple output files
+        with patch(
+            "discordmanimator.cogs.render_codeblock.aiodocker.Docker"
+        ) as mock_docker_class:
+            mock_docker = AsyncMock()
+            mock_docker.__aenter__ = AsyncMock(return_value=mock_docker)
+            mock_docker.__aexit__ = AsyncMock(return_value=None)
+            mock_docker_class.return_value = mock_docker
+
+            async def mock_log_iterator():
+                return
+                yield
+
+            mock_container = AsyncMock()
+            mock_container.log = MagicMock(return_value=mock_log_iterator())
+            mock_docker.containers.run = AsyncMock(return_value=mock_container)
+            mock_docker.close = AsyncMock()
+
+            # Mock rglob to return multiple files
+            with patch("pathlib.Path.rglob") as mock_rglob:
+                mock_path1 = MagicMock()
+                mock_path1.name = "scriptoutput.mp4"
+                mock_path2 = MagicMock()
+                mock_path2.name = "scriptoutput.gif"
+                mock_path3 = MagicMock()
+                mock_path3.name = "scriptoutput.png"
+                mock_rglob.return_value = [mock_path1, mock_path2, mock_path3]
+
+                with patch("builtins.open", create=True):
+                    with patch("tempfile.TemporaryDirectory") as mock_tmpdir:
+                        mock_tmpdir.return_value.__enter__.return_value = "/tmp/test"
+
+                        result = await render_animation_snippet(mock_message)
+
+                        assert "Multiple output files found (3)" in result["content"]
+                        assert "scriptoutput.mp4" in result["content"]
+                        assert "scriptoutput.gif" in result["content"]
+                        assert "scriptoutput.png" in result["content"]
+                        assert "Expected exactly one" in result["content"]
+                        assert result["cli_flags"] == []
+                        assert "attachments" not in result

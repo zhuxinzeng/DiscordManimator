@@ -333,34 +333,54 @@ async def render_animation_snippet(
                 ],
             }
 
-        # Find output file
+        # Find output file - we expect exactly one file matching scriptoutput.*
         output_files = list(Path(tmpdirname).rglob("scriptoutput.*"))
-        if len(output_files) == 0:
+        num_files = len(output_files)
+
+        if num_files == 0:
+            # No output file was produced - likely a rendering error
             render_time = time.time() - start_time
             logger.warning(
                 "Render failed: No output file produced",
-                extra={**log_extra, "render_time_seconds": round(render_time, 2)},
-            )
-            return {
-                "content": "No output file was produced. :cry:",
-                "cli_flags": cli_flags,
-            }
-        elif len(output_files) > 1:
-            render_time = time.time() - start_time
-            logger.warning(
-                "Render failed: Multiple output files",
                 extra={
                     **log_extra,
                     "render_time_seconds": round(render_time, 2),
-                    "file_count": len(output_files),
+                    "expected_pattern": "scriptoutput.*",
                 },
             )
             return {
-                "content": f"Multiple output files found ({len(output_files)}). :cry:",
+                "content": (
+                    "No output file was produced. :cry:\n\n"
+                    "This usually means the scene didn't render successfully. "
+                    "Check the error log above for details."
+                ),
                 "cli_flags": cli_flags,
             }
 
-        # Success case
+        if num_files > 1:
+            # Multiple output files found - unexpected, log details for debugging
+            render_time = time.time() - start_time
+            file_names = [f.name for f in output_files]
+            logger.warning(
+                "Render failed: Multiple output files found",
+                extra={
+                    **log_extra,
+                    "render_time_seconds": round(render_time, 2),
+                    "file_count": num_files,
+                    "file_names": file_names,
+                },
+            )
+            return {
+                "content": (
+                    f"Multiple output files found ({num_files}). :cry:\n\n"
+                    f"Expected exactly one output file, but found: "
+                    f"{', '.join(file_names)}\n\n"
+                    "This is unexpected - please report this issue."
+                ),
+                "cli_flags": cli_flags,
+            }
+
+        # Success case - exactly one output file
         outfilepath = output_files[0]
         render_time = time.time() - start_time
         file_size_kb = outfilepath.stat().st_size / 1024
