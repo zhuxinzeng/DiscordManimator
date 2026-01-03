@@ -163,6 +163,36 @@ async def handle_render_request(
     return response, view
 
 
+def _parse_memory_string(memory_str: str) -> int:
+    """Parse memory string (e.g., '512m', '1g') to bytes for Docker API.
+
+    Docker API expects memory limit as an integer in bytes.
+
+    Args:
+        memory_str: Memory string like '512m', '1g', '2048k'
+
+    Returns:
+        Memory limit in bytes
+
+    Examples:
+        >>> _parse_memory_string("512m")
+        536870912
+        >>> _parse_memory_string("1g")
+        1073741824
+        >>> _parse_memory_string("2048k")
+        2097152
+    """
+    memory_str = memory_str.lower()
+    if memory_str.endswith("k"):
+        return int(memory_str[:-1]) * 1024
+    elif memory_str.endswith("m"):
+        return int(memory_str[:-1]) * 1024 * 1024
+    elif memory_str.endswith("g"):
+        return int(memory_str[:-1]) * 1024 * 1024 * 1024
+    else:
+        raise ValueError(f"Invalid memory string format: {memory_str}")
+
+
 def prepare_snippet(raw_content: str, config) -> list[str]:
     """Extract and transform snippet into script lines ready to write.
 
@@ -235,6 +265,7 @@ def build_container_config(
         "HostConfig": {
             "Binds": [f"{script_dir}:/manim/:rw"],
             "AutoRemove": True,
+            "Memory": _parse_memory_string(config.render.container_memory),
         },
     }
 

@@ -57,6 +57,7 @@ class TestRenderConfig:
         assert config.use_onlinetex is False
         assert config.view_timeout == 120
         assert config.container_timeout == 120
+        assert config.container_memory == "512m"
         assert config.render_quality == "m"
         assert config.docker_image == "manimcommunity/manim:stable"
 
@@ -137,6 +138,29 @@ class TestRenderConfig:
         # Empty image should fail
         with pytest.raises(ValidationError):
             RenderConfig(docker_image="")
+
+    def test_container_memory_validation(self):
+        """Test container_memory validation."""
+        # Valid memory strings
+        for memory in ["512k", "256m", "1g", "2g", "1024k", "2048m"]:
+            config = RenderConfig(container_memory=memory)
+            assert config.container_memory == memory
+
+        # Invalid memory strings
+        with pytest.raises(ValidationError):
+            RenderConfig(container_memory="512")  # No unit
+
+        with pytest.raises(ValidationError):
+            RenderConfig(container_memory="512mb")  # Invalid unit
+
+        with pytest.raises(ValidationError):
+            RenderConfig(container_memory="1GB")  # Uppercase
+
+        with pytest.raises(ValidationError):
+            RenderConfig(container_memory="")  # Empty
+
+        with pytest.raises(ValidationError):
+            RenderConfig(container_memory="abc")  # Not a number
 
 
 class TestConfig:

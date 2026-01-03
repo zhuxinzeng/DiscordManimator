@@ -50,6 +50,7 @@ class RenderConfig(BaseModel):
         use_onlinetex: Whether to use manim-onlinetex for LaTeX rendering
         view_timeout: Timeout in seconds for button view before it's removed
         container_timeout: Timeout in seconds for Docker container execution
+        container_memory: Memory limit for Docker container (e.g., "512m", "1g")
         render_quality: Default render quality (l=low, m=medium, h=high, k=4k)
         docker_image: Docker image to use for rendering
     """
@@ -76,6 +77,12 @@ class RenderConfig(BaseModel):
         description="Timeout in seconds for Docker container execution",
         ge=10,
         le=600,  # Max 10 minutes to prevent abuse
+    )
+
+    container_memory: str = Field(
+        default="512m",
+        description="Memory limit for Docker container (e.g., '512m', '1g', '2g')",
+        pattern=r"^\d+[kmg]$",
     )
 
     render_quality: str = Field(
@@ -244,6 +251,7 @@ class Config(BaseSettings):
         if not self.render.disable_docker:
             print(f"  Docker image: {self.render.docker_image}")
             print(f"  Container timeout: {self.render.container_timeout}s")
+            print(f"  Container memory: {self.render.container_memory}")
         print(f"  OnlineTeX: {'enabled' if self.render.use_onlinetex else 'disabled'}")
         print(f"  Default quality: {self.render.render_quality}")
         print(f"  View timeout: {self.render.view_timeout}s")

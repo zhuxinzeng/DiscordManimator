@@ -12,3 +12,4 @@ view_timeout = 120
 container_timeout = 120
 render_quality = "m"
 docker_image = "manimcommunity/manim:stable"
+container_memory = "1g"

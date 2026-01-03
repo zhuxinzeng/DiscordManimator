@@ -358,3 +358,51 @@ class TestRenderAnimationSnippet:
                         assert "Expected exactly one" in result["content"]
                         assert result["cli_flags"] == []
                         assert "attachments" not in result
+
+
+class TestMemoryParsing:
+    """Tests for memory string parsing helper."""
+
+    def test_parse_memory_kilobytes(self):
+        """Test parsing kilobyte memory strings."""
+        from discordmanimator.cogs.render_codeblock import _parse_memory_string
+
+        assert _parse_memory_string("512k") == 512 * 1024
+        assert _parse_memory_string("1024k") == 1024 * 1024
+        assert _parse_memory_string("1k") == 1024
+
+    def test_parse_memory_megabytes(self):
+        """Test parsing megabyte memory strings."""
+        from discordmanimator.cogs.render_codeblock import _parse_memory_string
+
+        assert _parse_memory_string("512m") == 512 * 1024 * 1024
+        assert _parse_memory_string("1m") == 1024 * 1024
+        assert _parse_memory_string("256m") == 256 * 1024 * 1024
+
+    def test_parse_memory_gigabytes(self):
+        """Test parsing gigabyte memory strings."""
+        from discordmanimator.cogs.render_codeblock import _parse_memory_string
+
+        assert _parse_memory_string("1g") == 1024 * 1024 * 1024
+        assert _parse_memory_string("2g") == 2 * 1024 * 1024 * 1024
+
+    def test_parse_memory_case_insensitive(self):
+        """Test that parsing is case insensitive."""
+        from discordmanimator.cogs.render_codeblock import _parse_memory_string
+
+        assert _parse_memory_string("512K") == 512 * 1024
+        assert _parse_memory_string("512M") == 512 * 1024 * 1024
+        assert _parse_memory_string("1G") == 1024 * 1024 * 1024
+
+    def test_parse_memory_invalid_format(self):
+        """Test that invalid formats raise errors."""
+        from discordmanimator.cogs.render_codeblock import _parse_memory_string
+
+        with pytest.raises(ValueError):
+            _parse_memory_string("512")  # No unit
+
+        with pytest.raises(ValueError):
+            _parse_memory_string("abc")  # Not a number
+
+        with pytest.raises(ValueError):
+            _parse_memory_string("512x")  # Invalid unit
