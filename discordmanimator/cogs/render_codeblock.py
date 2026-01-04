@@ -3,7 +3,6 @@ from __future__ import annotations
 import io
 import logging
 import os
-import re
 import tempfile
 import traceback
 from pathlib import Path
@@ -14,6 +13,12 @@ import discord
 from discord.ext import commands
 
 from ..config import Config, get_config
+from ..snippet_parser import (
+    extract_non_animation_code,
+    extract_snippet_from_message,
+    parse_snippet,
+    rename_function_to_construct,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +34,7 @@ class RenderCodeblock(commands.Cog):
         if message.author.id == self.bot.user.id:
             return
 
-        if extract_manim_snippets(message.content):
+        if extract_snippet_from_message(message.content):
             view = RenderView(timeout=self.config.render.view_timeout)
             message = await message.reply(
                 "This message looks like it contains a Manim snippet, "
@@ -120,9 +125,58 @@ class SettingsModal(discord.ui.Modal, title="Change render settings"):
             view.message = message
 
 
-def extract_manim_snippets(msg: str) -> list[str]:
-    pattern = re.compile(r"```(?:python|py)?([^`]*def construct[^`]*)```")
-    return pattern.findall(msg)
+def prepare_snippet(raw_content: str, config: Config) -> list[str]:
+    """Extract and transform snippet into script lines ready to write.
+
+    Args:
+        raw_content: Raw message content containing code snippet
+        config: Bot configuration with render settings
+
+    Returns:
+        List of script lines including imports and snippet code
+    """
+    # Extract first snippet
+    snippets = extract_snippet_from_message(raw_content)
+    if not snippets:
+        raise ValueError("No valid animation snippet found in message")
+
+    raw_snippet = snippets[0]
+    snippet_info = parse_snippet(raw_snippet)
+
+    if snippet_info is None:
+        raise ValueError("Failed to parse animation snippet")
+
+    # Build script lines
+    script_lines = []
+
+    # Add default imports (from manim import *)
+    script_lines.append("from manim import *")
+    if config.render.use_onlinetex:
+        script_lines.append("from manim_onlinetex import *")
+
+    # Add user code
+    if snippet_info.needs_wrapping:
+        # User provided a bare function
+        # Add all non-animation code (imports, helpers, etc.)
+        non_animation_code = extract_non_animation_code(
+            snippet_info.raw_code, snippet_info.function_name
+        )
+        script_lines.extend(non_animation_code)
+
+        # Rename function to 'construct' and change parameter to 'self'
+        renamed_function = rename_function_to_construct(
+            snippet_info.animation_function, snippet_info.function_name
+        )
+
+        # Wrap the renamed function in a Scene class
+        script_lines.append("class Manimation(Scene):")
+        for line in renamed_function.split("\n"):
+            script_lines.append("    " + line)
+    else:
+        # User provided a class - add entire snippet as-is
+        script_lines.extend(snippet_info.animation_function.split("\n"))
+
+    return script_lines
 
 
 async def handle_render_request(
@@ -195,36 +249,6 @@ def _parse_memory_string(memory_str: str) -> int:
         return int(memory_str[:-1]) * 1024 * 1024 * 1024
     else:
         raise ValueError(f"Invalid memory string format: {memory_str}")
-
-
-def prepare_snippet(raw_content: str, config: Config) -> list[str]:
-    """Extract and transform snippet into script lines ready to write.
-
-    Args:
-        raw_content: Raw message content containing code snippet
-        config: Bot configuration with render settings
-
-    Returns:
-        List of script lines including imports and snippet code
-    """
-    # Extract first snippet
-    [snippet, *rest] = extract_manim_snippets(raw_content)
-    snippet = snippet.strip()
-
-    # Transform snippet: wrap bare construct() methods in class
-    if snippet.startswith("def construct(self):"):
-        snippet_lines = ["class Manimation(Scene):"] + [
-            "    " + line for line in snippet.split("\n")
-        ]
-    else:
-        snippet_lines = snippet.split("\n")
-
-    # Build script with imports
-    prescript = ["from manim import *"]
-    if config.render.use_onlinetex:
-        prescript.append("from manim_onlinetex import *")
-
-    return prescript + snippet_lines
 
 
 def build_container_config(
