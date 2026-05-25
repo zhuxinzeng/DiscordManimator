@@ -1,26 +1,32 @@
-# 使用官方 Python 3.11 镜像作为基础
+# 使用官方 Python 3.11 镜像
 FROM python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖 (Manim 渲染需要 ffmpeg 和 LaTeX 环境)
+# 安装系统依赖 (ffmpeg, latex 等，与之前相同)
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     texlive \
     texlive-latex-extra \
     && rm -rf /var/lib/apt/lists/*
 
-# 升级 pip 并安装 Python 依赖
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir manim
+# 复制项目文件
+COPY pyproject.toml poetry.lock ./
 
-# 复制项目所有文件
+# 👇 1. 通过阿里云镜像安装 Poetry
+RUN pip install --no-cache-dir poetry -i https://mirrors.aliyun.com/pypi/simple/
+
+# 👇 2. 先导出依赖并用阿里云镜像通过 pip 安装，利用 Docker 缓存
+RUN poetry export -f requirements.txt --output requirements.txt --without-hashes \
+    && pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+
+# 复制剩余的项目代码
 COPY . .
 
-# 声明运行时容器监听的端口
-EXPOSE 8000
+# 👇 3. 最后安装项目本身
+RUN poetry install --no-root
 
-# 启动命令 (根据项目实际入口文件调整)
-CMD ["python", "main.py"]
+# 声明端口和启动命令（需要根据项目实际入口调整）
+EXPOSE 8000
+# CMD ["python", "main.py"]
