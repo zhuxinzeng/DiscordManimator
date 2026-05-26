@@ -12,11 +12,19 @@ logger = logging.getLogger(__name__)
 
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if self.path in ("/", "/health", "/healthz"):
+        if self.path in ("/health", "/healthz"):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
             self.wfile.write(b"ok")
+        elif self.path == "/":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                b"DiscordManimator is running. This is a Discord bot, not a web app.\n"
+                b"Use /health for load-balancer probes.\n"
+            )
         else:
             self.send_response(404)
             self.end_headers()
@@ -27,12 +35,7 @@ class _HealthHandler(BaseHTTPRequestHandler):
 
 def start_health_server() -> HTTPServer | None:
     """Bind to PORT (default 8080) on 0.0.0.0 for load-balancer health probes."""
-    port_str = os.environ.get("PORT")
-    if not port_str:
-        logger.info("PORT not set; skipping health check HTTP server")
-        return None
-
-    port = int(port_str)
+    port = int(os.environ.get("PORT", "8080"))
     server = HTTPServer(("0.0.0.0", port), _HealthHandler)
     thread = threading.Thread(target=server.serve_forever, daemon=True, name="health")
     thread.start()

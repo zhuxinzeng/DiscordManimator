@@ -32,13 +32,15 @@ start_dockerd_if_needed() {
   echo "WARNING: Docker daemon did not become ready; Manim rendering may fail"
 }
 
-start_dockerd_if_needed
-
-if docker info >/dev/null 2>&1; then
-  MANIM_IMAGE="${DISCORDMANIMATOR_RENDER__DOCKER_IMAGE:-manimcommunity/manim:stable}"
-  echo "Pulling Manim image $MANIM_IMAGE in background..."
-  docker pull "$MANIM_IMAGE" >/dev/null 2>&1 &
-fi
+# Do not block bot startup: Docker init can take up to 60s and causes 502 on Zeabur.
+(
+  start_dockerd_if_needed
+  if docker info >/dev/null 2>&1; then
+    MANIM_IMAGE="${DISCORDMANIMATOR_RENDER__DOCKER_IMAGE:-manimcommunity/manim:stable}"
+    echo "Pulling Manim image $MANIM_IMAGE in background..."
+    docker pull "$MANIM_IMAGE" >/dev/null 2>&1 || true
+  fi
+) &
 
 CONFIG_ARGS=""
 if [ -n "$CONFIG_PATH" ] && [ -f "$CONFIG_PATH" ]; then

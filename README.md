@@ -55,3 +55,15 @@ The entrypoint script pulls `manimcommunity/manim:stable` when Docker is reachab
 docker build -t discordmanimator .
 docker run --rm -e DISCORDMANIMATOR_TOKEN="your-token" -e PORT=8080 -p 8080:8080 discordmanimator
 ```
+
+### 5. 502 SERVICE_UNAVAILABLE 排查
+
+这是一个 **Discord Bot**，不是网站。公网域名只用于 Zeabur 健康检查，正常访问应看到纯文本或 `/health` 返回 `ok`。
+
+若出现 502，按顺序检查：
+
+1. **Networking 端口**：Zeabur 控制台 → 服务 → **Networking** → 容器端口必须是 **8080**（与 `Dockerfile` 的 `EXPOSE 8080` 一致）。域名应绑定到这个端口。
+2. **不要手动改 `PORT`**：除非你知道在做什么，否则删掉自定义的 `PORT` 环境变量，让 Zeabur 自动注入。
+3. **看 Logs**：若容器启动后立刻退出（Token 无效、配置错误等），网关也会 502。日志里应有 `Health check server listening` 和 `Logged in as ...`。
+4. **重新部署**：推送最新代码后 Redeploy（已修复：Docker 初始化不再阻塞 Bot 启动）。
+5. **Bot 是否在线**：502 不影响 Discord 侧——若日志显示已登录，在 Discord 服务器成员列表里看 Bot 是否在线即可。

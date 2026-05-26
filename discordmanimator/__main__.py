@@ -20,6 +20,9 @@ def main() -> None:
     # Set up logging with support for structured extra fields
     setup_logging_with_extra_fields()
 
+    # Bind PORT before config/Docker work so Zeabur health checks pass immediately.
+    start_health_server()
+
     parser = argparse.ArgumentParser(
         prog="DiscordManimator",
         description="Discord bot for rendering Manim animations",
@@ -121,8 +124,6 @@ def main() -> None:
     if args.validate_only:
         print("\n✓ Configuration is valid!")
         return
-
-    start_health_server()
 
     # Create and run the bot
     print("\nStarting bot...")
