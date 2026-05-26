@@ -1,38 +1,34 @@
-# 使用 Python 3.11 官方镜像
+# 使用更常用的 Python 3.11 官方镜像作为基础
 FROM python:3.11-slim
 
 # 设置工作目录
 WORKDIR /app
 
-# 设置环境变量：防止生成 .pyc 文件，确保日志实时输出
+# 设置环境变量，避免Python生成__pycache__文件，并确保输出不被缓存
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# 更换 pip 源为阿里云（加速下载，可选）
-RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/
-
-# 安装系统依赖（Manim 渲染必需：ffmpeg + LaTeX 完整环境）
+# 安装 Manim 渲染所需的系统依赖
+# 注意：这部分内容我们暂时保留了，以免遗漏关键的系统级工具。
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    gcc \
-    g++ \
-    curl \
     ffmpeg \
     texlive \
     texlive-latex-extra \
-    libffi-dev \
-    libssl-dev \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制整个项目（注意：如果你有 .dockerignore，建议排除 __pycache__ 等）
+# 复制我们在上一步生成的 requirements.txt 文件
+COPY requirements.txt .
+
+# （核心修改）使用阿里云镜像加速，安装所有依赖
+# --no-cache-dir 防止 pip 缓存膨胀，-i 指定国内镜像源加速下载
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+
+# 最后，复制项目源代码
 COPY . .
 
-# 直接通过 pip 安装项目本身及其所有依赖（pip 会自动解析 pyproject.toml）
-# 这完全绕过了脆弱的 poetry export
-RUN pip install --no-cache-dir .
-
-# 暴露端口（根据 Manimator 实际监听端口调整，常见为 8000）
+# 暴露端口（根据你的实际 Web 端口号调整）
 EXPOSE 8000
 
-# 启动命令（根据项目实际入口文件调整，这里假设是 main.py）
-CMD ["python", "main.py"]
+# 启动命令（同样根据项目的实际入口文件来修改）
+CMD ["python", "app.py"]
