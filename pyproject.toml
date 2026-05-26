@@ -22,10 +22,6 @@ dev = [
   "ty>=0.0.8",
 ]
 
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
 [tool.pytest]
 testpaths = ["tests"]
 asyncio_mode = "auto"

@@ -1,0 +1,48 @@
+# Optional: deploy bot + Docker-in-Docker as two Zeabur services for Manim rendering.
+# Import via Zeabur Dashboard → Deploy Template, or: npx zeabur@latest template deploy -f zeabur.template.yaml
+#
+# For bot-only (no render), deploy from Git with the root Dockerfile instead.
+
+apiVersion: zeabur.com/v1
+kind: Template
+metadata:
+  name: DiscordManimator
+spec:
+  description: Discord Manim bot with a dedicated Docker daemon for rendering
+  variables:
+    - key: DISCORD_TOKEN
+      name: Discord Bot Token
+      description: Token from https://discord.com/developers/applications (MESSAGE CONTENT intent required)
+  services:
+    - name: docker
+      icon: https://cdn.zeabur.com/docker.png
+      template: PREBUILT
+      spec:
+        image: docker:27-dind
+        ports:
+          - id: docker-api
+            port: 2375
+            type: TCP
+        env:
+          DOCKER_TLS_CERTDIR: ""
+        command:
+          - dockerd
+        args:
+          - --host=tcp://0.0.0.0:2375
+          - --host=unix:///var/run/docker.sock
+          - --tls=false
+    - name: bot
+      icon: https://cdn.zeabur.com/python.png
+      template: GIT
+      spec:
+        source:
+          type: GITHUB
+          repoID: REPLACE_WITH_YOUR_GITHUB_REPO_ID
+        ports:
+          - id: web
+            port: 8080
+            type: HTTP
+        env:
+          DISCORDMANIMATOR_TOKEN: ${DISCORD_TOKEN}
+          DOCKER_HOST: tcp://docker.zeabur.internal:2375
+          PORT: "8080"

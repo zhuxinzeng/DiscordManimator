@@ -1,34 +1,27 @@
-# 使用更常用的 Python 3.11 官方镜像作为基础
-FROM python:3.11-slim
+FROM python:3.13-slim-bookworm
 
-# 设置工作目录
 WORKDIR /app
 
-# 设置环境变量，避免Python生成__pycache__文件，并确保输出不被缓存
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
 
-# 安装 Manim 渲染所需的系统依赖
-# 注意：这部分内容我们暂时保留了，以免遗漏关键的系统级工具。
+# Docker CLI/daemon for Manim container renders; ffmpeg not required in the bot image.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    texlive \
-    texlive-latex-extra \
-    build-essential \
+    docker.io \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制我们在上一步生成的 requirements.txt 文件
-COPY requirements.txt .
+COPY pyproject.toml README.md ./
+COPY discordmanimator ./discordmanimator
 
-# （核心修改）使用阿里云镜像加速，安装所有依赖
-# --no-cache-dir 防止 pip 缓存膨胀，-i 指定国内镜像源加速下载
-RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
+RUN pip install --no-cache-dir .
 
-# 最后，复制项目源代码
-COPY . .
+COPY scripts/zeabur-entrypoint.sh /usr/local/bin/zeabur-entrypoint.sh
+RUN chmod +x /usr/local/bin/zeabur-entrypoint.sh
 
-# 暴露端口（根据你的实际 Web 端口号调整）
-EXPOSE 8000
+# Zeabur injects PORT at runtime; the bot binds there for health checks.
+ENV PORT=8080
+EXPOSE 8080
 
-# 启动命令（同样根据项目的实际入口文件来修改）
-CMD ["python", "app.py"]
+ENTRYPOINT ["/usr/local/bin/zeabur-entrypoint.sh"]
