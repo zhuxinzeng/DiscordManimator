@@ -1,32 +1,40 @@
-# 使用官方 Python 3.11 镜像
 FROM python:3.11-slim
 
-# 设置工作目录
 WORKDIR /app
 
-# 安装系统依赖 (ffmpeg, latex 等，与之前相同)
-RUN apt-get update && apt-get install -y \
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# 安装系统依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    curl \
     ffmpeg \
     texlive \
     texlive-latex-extra \
+    libffi-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制项目文件
+# 安装 Poetry
+RUN pip install --no-cache-dir poetry==1.8.3
+
+# 先复制依赖文件，利用缓存
 COPY pyproject.toml poetry.lock ./
 
-# 👇 1. 通过阿里云镜像安装 Poetry
-RUN pip install --no-cache-dir poetry -i https://mirrors.aliyun.com/pypi/simple/
+# 导出 requirements 并安装依赖
+RUN poetry export -f requirements.txt --without-hashes -o requirements.txt \
+    && pip install --no-cache-dir -r requirements.txt
 
-# 👇 2. 先导出依赖并用阿里云镜像通过 pip 安装，利用 Docker 缓存
-RUN poetry export -f requirements.txt --output requirements.txt --without-hashes \
-    && pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/
-
-# 复制剩余的项目代码
+# 再复制源码
 COPY . .
 
-# 👇 3. 最后安装项目本身
-RUN poetry install --no-root
+# 如果你的项目需要安装自身为包，取消注释
+# RUN pip install --no-cache-dir .
 
-# 声明端口和启动命令（需要根据项目实际入口调整）
 EXPOSE 8000
-# CMD ["python", "main.py"]
+
+# 按你的实际入口修改
+CMD ["python", "main.py"]
